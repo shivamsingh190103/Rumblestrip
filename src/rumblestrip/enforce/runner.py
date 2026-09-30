@@ -127,8 +127,12 @@ def text_report(result: dict[str, Any], *, verbose: bool = False) -> str:
     warnings = sum(item.severity == "warning" for item in result["visible"])
     if result["failure_count"]:
         lines.append(f"{errors} errors, {warnings} warnings. Commit blocked (fail_on: {result['fail_on']}).")
+        lines.append("Next steps: run 'rumblestrip explain <rule-id>' for rule context, fix findings, then rerun 'rumblestrip check --staged'.")
     else:
         lines.append(f"{errors} errors, {warnings} warnings.")
+        lines.append("Next steps: run 'rumblestrip stats' to track recurring violations over time.")
+    if result["errors"]:
+        lines.append("Tool errors occurred; rerun with --verbose to inspect skipped files and engine issues.")
     return "\n".join(lines)
 
 

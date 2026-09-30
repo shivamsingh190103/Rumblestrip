@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from rumblestrip.core.paths import state_home
 
@@ -38,6 +37,7 @@ CREATE TABLE IF NOT EXISTS jobs(
  attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_state ON candidates(state);
+CREATE INDEX IF NOT EXISTS idx_candidates_cluster ON candidates(repo_root, cluster_id);
 CREATE INDEX IF NOT EXISTS idx_violations_rule ON violations(rule_id, created_at);
 """
 
@@ -57,13 +57,37 @@ class StateDB:
             directory = Path.cwd() / ".rumblestrip" / ".cache" / "local-state"
             directory.mkdir(parents=True, exist_ok=True)
         self.path = directory / "state.db"
-        self.conn = sqlite3.connect(self.path, timeout=5)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA busy_timeout=5000")
-        self.conn.executescript(SCHEMA)
-        self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '1')")
-        self.conn.commit()
+        self.conn = self._connect(self.path)
+        self._bootstrap()
+
+    def _connect(self, path: Path) -> sqlite3.Connection:
+        conn = sqlite3.connect(path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        return conn
+
+    def _bootstrap(self) -> None:
+        try:
+            self.conn.executescript(SCHEMA)
+            self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '1')")
+            check = self.conn.execute("PRAGMA integrity_check").fetchone()
+            if check and check[0] != "ok":
+                raise sqlite3.DatabaseError(str(check[0]))
+            self.conn.commit()
+        except sqlite3.DatabaseError:
+            backup = self.path.with_suffix(".db.corrupt")
+            try:
+                if backup.exists():
+                    backup.unlink()
+                self.path.replace(backup)
+            except OSError:
+                pass
+            self.conn.close()
+            self.conn = self._connect(self.path)
+            self.conn.executescript(SCHEMA)
+            self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '1')")
+            self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -87,11 +111,38 @@ class StateDB:
         )
         self.conn.commit()
 
-    def add_candidate(self, source_id: int, repo_root: Path, window_hash: str, evidence: dict[str, Any], signal: str) -> bool:
+    def add_candidate(
+        self,
+        source_id: int,
+        repo_root: Path,
+        window_hash: str,
+        evidence: dict[str, Any],
+        signal: str,
+        *,
+        cluster_id: str | None = None,
+        labels: dict[str, Any] | None = None,
+    ) -> bool:
+        if cluster_id:
+            existing = self.conn.execute(
+                "SELECT 1 FROM candidates WHERE repo_root=? AND cluster_id=? LIMIT 1",
+                (str(repo_root), cluster_id),
+            ).fetchone()
+            if existing:
+                return False
         try:
             self.conn.execute(
-                "INSERT INTO candidates(source_id,repo_root,window_hash,signal,evidence_json,detector_version,created_at) VALUES (?,?,?,?,?,?,?)",
-                (source_id, str(repo_root), window_hash, signal, json.dumps(evidence), "heuristic-v1", utc_now()),
+                "INSERT INTO candidates(source_id,repo_root,window_hash,cluster_id,signal,evidence_json,label_json,detector_version,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    source_id,
+                    str(repo_root),
+                    window_hash,
+                    cluster_id,
+                    signal,
+                    json.dumps(evidence),
+                    json.dumps(labels) if labels else None,
+                    "heuristic-v2",
+                    utc_now(),
+                ),
             )
             self.conn.commit()
             return True
@@ -103,6 +154,10 @@ class StateDB:
 
     def candidate(self, candidate_id: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone()
+
+    def update_candidate_state(self, candidate_id: int, state: str) -> None:
+        self.conn.execute("UPDATE candidates SET state=? WHERE id=?", (state, candidate_id))
+        self.conn.commit()
 
     def add_proposal(self, candidate_id: int, rule: dict[str, Any], kind: str, artifacts: dict[str, Any], validation: dict[str, Any]) -> bool:
         try:
@@ -139,7 +194,7 @@ class StateDB:
 
     def stats(self, root: Path) -> list[sqlite3.Row]:
         return list(self.conn.execute(
-            "SELECT rule_id,COUNT(*) AS fires,SUM(CASE WHEN verdict='false_positive' THEN 1 ELSE 0 END) AS false_positives,MAX(created_at) AS last_seen FROM violations WHERE repo_root=? GROUP BY rule_id ORDER BY fires DESC",
+            "SELECT rule_id,COUNT(*) AS fires,SUM(CASE WHEN severity='error' THEN 1 ELSE 0 END) AS errors,SUM(CASE WHEN severity='warning' THEN 1 ELSE 0 END) AS warnings,SUM(CASE WHEN verdict='false_positive' THEN 1 ELSE 0 END) AS false_positives,MAX(created_at) AS last_seen FROM violations WHERE repo_root=? GROUP BY rule_id ORDER BY fires DESC",
             (str(root),),
         ))
 

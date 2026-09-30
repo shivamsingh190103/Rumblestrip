@@ -96,7 +96,7 @@ def command_harvest(args: argparse.Namespace) -> int:
             paths.extend(("codex", path) for path in discover("codex"))
         if args.agent in {"all", "claude"}:
             paths.extend(("claude", path) for path in discover("claude"))
-    seen = added = 0
+    seen = added = deduped = 0
     for kind, path in paths:
         source = db.source(kind, path, root)
         offset = int(source["byte_offset"])
@@ -105,11 +105,21 @@ def command_harvest(args: argparse.Namespace) -> int:
         events, next_offset, error = read_new_events(path, offset)
         for window in correction_windows(events):
             seen += 1
-            if db.add_candidate(int(source["id"]), root, window["hash"], window["evidence"], "heuristic"):
+            if db.add_candidate(
+                int(source["id"]),
+                root,
+                window["hash"],
+                window["evidence"],
+                str(window.get("signal") or "heuristic"),
+                cluster_id=str(window.get("cluster_id") or ""),
+                labels={"quality": window.get("quality", {})},
+            ):
                 added += 1
+            else:
+                deduped += 1
         db.update_source(int(source["id"]), next_offset, path.stat().st_size if path.exists() else 0, error)
     db.close()
-    print(f"Harvested {len(paths)} source(s): {added} new correction candidate(s), {seen - added} already known.")
+    print(f"Harvested {len(paths)} source(s): {added} new correction candidate(s), {deduped} deduplicated.")
     return 0
 
 
@@ -117,15 +127,30 @@ def command_propose(args: argparse.Namespace) -> int:
     root = root_from(args)
     db = StateDB()
     candidates = db.candidates(root)
-    created = 0
+    created = skipped = invalid = 0
     for candidate in candidates:
-        evidence = json.loads(candidate["evidence_json"])
+        try:
+            evidence = json.loads(candidate["evidence_json"])
+            labels = json.loads(candidate["label_json"]) if candidate["label_json"] else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            db.update_candidate_state(int(candidate["id"]), "deferred")
+            skipped += 1
+            continue
+        quality = labels.get("quality", {})
+        score = float(quality.get("score", 0.0))
+        if score < 0.5:
+            db.update_candidate_state(int(candidate["id"]), "deferred")
+            skipped += 1
+            continue
         rule, check, tests = synthesize(evidence, int(candidate["id"]))
         validation = validate(root, rule, check, tests)
-        if db.add_proposal(int(candidate["id"]), rule, rule["kind"], {"check": check, "tests": tests}, validation):
+        if not validation.get("ok"):
+            invalid += 1
+            continue
+        if db.add_proposal(int(candidate["id"]), rule, rule["kind"], {"check": check, "tests": tests, "quality": quality}, validation):
             created += 1
     db.close()
-    print(f"Created {created} proposal(s). Run: rumblestrip review")
+    print(f"Created {created} proposal(s), deferred {skipped} low-confidence candidate(s), skipped {invalid} invalid proposal(s). Run: rumblestrip review")
     return 0
 
 
@@ -156,9 +181,12 @@ def command_review(args: argparse.Namespace) -> int:
     for proposal in pending:
         rule = proposal["rule"]
         states = ", ".join(f"{entry['step']}:{entry['status']}" for entry in proposal["validation"].get("steps", []))
-        print(f"{proposal['id']:>3}  {rule['title']:<55.55} {rule['kind']:<18} {states}")
+        score = proposal.get("quality", {}).get("score")
+        confidence = f"confidence:{score:.2f}" if isinstance(score, (int, float)) else "confidence:n/a"
+        print(f"{proposal['id']:>3}  {rule['title']:<55.55} {rule['kind']:<18} {confidence:<16} {states}")
     print("\nApprove: rumblestrip review --approve ID [--baseline]")
     print("Reject:  rumblestrip review --reject ID --reason 'too specific'")
+    print("Defer:   rumblestrip review --defer ID --reason 'needs stronger evidence'")
     return 0
 
 
@@ -231,6 +259,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         print(f"[ok]   config: {config_path(root)} (schema 1)")
     except ConfigError as exc:
         print(f"[fail] config: {exc}")
+        print("[hint] Run: rumblestrip init")
         return 2
     active = advisory = integrity = 0
     try:
@@ -243,6 +272,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     except IntegrityError as exc:
         failures += 1
         print(f"[fail] integrity: {exc}")
+        print("[hint] Inspect recent edits to .rumblestrip/rules and run: rumblestrip rules approve <rule-id> after review.")
     print("[ok]   ast-grep: available" if (shutil.which("ast-grep") or shutil.which("sg")) else "[warn] ast-grep: not found (built-in rules work; custom ast-grep rules require it)")
     print("[ok]   Codex hooks installed" if (root / ".codex" / "hooks.json").exists() else "[info] Codex hooks: not installed")
     print("[ok]   Claude Code hooks installed" if (root / ".claude" / "settings.json").exists() else "[info] Claude Code hooks: not installed")
@@ -252,6 +282,8 @@ def command_doctor(args: argparse.Namespace) -> int:
     pending = len(db.proposals(root))
     db.close()
     print(f"[info] {pending} proposal(s) waiting. Run: rumblestrip review" if pending else "[ok]   no pending proposals")
+    if not pending:
+        print("[next] Run: rumblestrip harvest && rumblestrip propose")
     return 2 if failures else 0
 
 
@@ -263,9 +295,12 @@ def command_stats(args: argparse.Namespace) -> int:
     if not rows:
         print("No local violation history yet.")
         return 0
-    print("Rule                                Fires  False positives  Last seen")
+    print("Rule                                Fires  Errors  Warnings  False positives  Last seen")
     for row in rows:
-        print(f"{row['rule_id']:<35} {row['fires']:<6} {row['false_positives'] or 0:<16} {row['last_seen']}")
+        recurring = " (recurring)" if int(row["fires"] or 0) >= 5 else ""
+        print(f"{row['rule_id']:<35} {row['fires']:<6} {row['errors'] or 0:<7} {row['warnings'] or 0:<9} {row['false_positives'] or 0:<16} {row['last_seen']}{recurring}")
+    top = rows[0]
+    print(f"\nTop impact rule: {top['rule_id']} ({top['fires']} fires, {top['errors'] or 0} errors).")
     return 0
 
 
@@ -316,7 +351,27 @@ def command_install(args: argparse.Namespace) -> int:
         if workflow.exists():
             raise ConfigError(f"refusing to overwrite existing {workflow}")
         workflow.parent.mkdir(parents=True, exist_ok=True)
-        workflow.write_text("name: Rumblestrip\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with: {fetch-depth: 0}\n      - uses: astral-sh/setup-uv@v5\n      - run: uvx --from rumblestrip rumblestrip check --diff origin/${{ github.base_ref }} --format github\n", encoding="utf-8")
+        workflow.write_text(
+            "name: Rumblestrip\n"
+            "on:\n"
+            "  pull_request:\n"
+            "  workflow_dispatch:\n"
+            "permissions:\n"
+            "  contents: read\n"
+            "jobs:\n"
+            "  check:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            "          fetch-depth: 0\n"
+            "      - uses: astral-sh/setup-uv@v5\n"
+            "      - name: Ensure base branch is fetched\n"
+            "        run: git fetch origin ${{ github.base_ref }} --depth=1\n"
+            "      - name: Run rumblestrip checks with PR annotations\n"
+            "        run: uvx --from rumblestrip rumblestrip check --diff origin/${{ github.base_ref }} --format github\n",
+            encoding="utf-8",
+        )
         installed.append("GitHub Actions workflow")
     print("Installed: " + ", ".join(installed) if installed else "Nothing selected. Use --git-hook, --agent, or --ci github.")
     return 0

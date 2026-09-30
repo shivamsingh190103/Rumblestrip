@@ -55,12 +55,16 @@ def normalise(record: dict[str, Any]) -> Event | None:
 def read_new_events(path: Path, offset: int) -> tuple[list[Event], int, str | None]:
     events: list[Event] = []
     try:
+        safe_offset = max(0, int(offset))
         with path.open("rb") as stream:
-            stream.seek(offset)
+            stream.seek(safe_offset)
             while True:
                 line = stream.readline()
                 if not line:
                     break
+                if len(line) > 5_000_000:
+                    # Skip suspiciously large records instead of exhausting memory.
+                    continue
                 if not line.endswith(b"\n"):
                     return events, stream.tell() - len(line), None
                 try:
@@ -74,7 +78,7 @@ def read_new_events(path: Path, offset: int) -> tuple[list[Event], int, str | No
                         events.append(event)
             return events, stream.tell(), None
     except OSError as exc:
-        return events, offset, str(exc)
+        return events, max(0, int(offset)), str(exc)
 
 
 def discover(kind: str) -> Iterator[Path]:

@@ -13,7 +13,24 @@ def queue(root: Path) -> list[dict[str, Any]]:
     db = StateDB()
     rows = db.proposals(root)
     db.close()
-    return [{"id": row["id"], "candidate_id": row["candidate_id"], "rule": json.loads(row["rule_json"]), "validation": json.loads(row["validation_json"]), "evidence": json.loads(row["evidence_json"])} for row in rows]
+    queue_rows: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            artifacts = json.loads(row["artifacts_json"])
+            rule = json.loads(row["rule_json"])
+            validation = json.loads(row["validation_json"])
+            evidence = json.loads(row["evidence_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        queue_rows.append({
+            "id": row["id"],
+            "candidate_id": row["candidate_id"],
+            "rule": rule,
+            "validation": validation,
+            "evidence": evidence,
+            "quality": artifacts.get("quality", {}),
+        })
+    return queue_rows
 
 
 def approve(root: Path, proposal_id: int, *, baseline: bool = False) -> str:
