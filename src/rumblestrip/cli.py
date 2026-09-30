@@ -8,22 +8,33 @@ import shlex
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from rumblestrip import __version__
 from rumblestrip.core.errors import ConfigError, IntegrityError, RumblestripError
-from rumblestrip.core.git import changed_files, git
 from rumblestrip.core.paths import config_path, find_repo_root, init_repository, load_config, rs_dir
 from rumblestrip.core.serde import dump_data, load_data
 from rumblestrip.detect.heuristic import correction_windows
 from rumblestrip.enforce.hooks import handle_hook
-from rumblestrip.enforce.runner import github_report, json_report, run_checks, sarif_report, text_report
-from rumblestrip.engines.builtin import run_rule
+from rumblestrip.enforce.runner import (
+    github_report,
+    json_report,
+    run_checks,
+    sarif_report,
+    text_report,
+)
 from rumblestrip.redact.redactor import redact
 from rumblestrip.review.plain import approve, decide, queue
 from rumblestrip.sources.jsonl import discover, read_new_events
 from rumblestrip.store.database import StateDB
-from rumblestrip.store.rules_repo import load_baseline, load_rules, reapprove, retire, save_baseline, verify_rule
+from rumblestrip.store.rules_repo import (
+    load_baseline,
+    load_rules,
+    reapprove,
+    retire,
+    save_baseline,
+    verify_rule,
+)
 from rumblestrip.synth.heuristic import synthesize
 from rumblestrip.validate.proposal import validate
 
@@ -238,7 +249,7 @@ def command_explain(args: argparse.Namespace) -> int:
     rows = [item for item in load_rules(root, include_inactive=True) if item[0].id == args.id]
     if not rows:
         raise ConfigError(f"unknown rule: {args.id}")
-    rule, _, tests, _ = rows[0]
+    rule, _, _, _ = rows[0]
     print(f"{rule.id}: {rule.statement}\n")
     print(f"Why: {rule.rationale or 'No rationale recorded.'}")
     if rule.fix_hint:
@@ -261,7 +272,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         print(f"[fail] config: {exc}")
         print("[hint] Run: rumblestrip init")
         return 2
-    active = advisory = integrity = 0
+    active = advisory = 0
     try:
         for rule, check, tests, _ in load_rules(root, include_inactive=True):
             active += rule.status == "active"

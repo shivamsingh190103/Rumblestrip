@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
 import unittest
-from pathlib import Path
 from argparse import Namespace
+from pathlib import Path
 
 from rumblestrip.cli import command_harvest, command_propose, command_review
 from rumblestrip.core.errors import IntegrityError

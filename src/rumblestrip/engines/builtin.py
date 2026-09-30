@@ -7,8 +7,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from rumblestrip.core.errors import ToolError
 from rumblestrip.core.models import Rule, Violation

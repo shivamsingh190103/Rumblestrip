@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +76,7 @@ def write_rule_bundle(root: Path, rule_data: dict[str, Any], check: dict[str, An
     directory.mkdir(parents=True)
     rule.approval = {
         "approved_by": approved_by or git_email(root),
-        "approved_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "approved_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
     rule.approval["content_hash"] = content_hash(rule, check, tests)
     dump_data(directory / "rule.yml", rule.to_dict())
@@ -94,7 +94,7 @@ def reapprove(root: Path, rule_id: str) -> Rule:
     check = load_data(directory / "check.yml") if (directory / "check.yml").exists() else {}
     tests = load_data(directory / "tests.yml") if (directory / "tests.yml").exists() else {}
     rule.approval["approved_by"] = git_email(root)
-    rule.approval["approved_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    rule.approval["approved_at"] = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     rule.approval["content_hash"] = content_hash(rule, check, tests)
     dump_data(directory / "rule.yml", rule.to_dict())
     return rule

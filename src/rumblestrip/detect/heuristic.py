@@ -6,7 +6,6 @@ from typing import Any
 from rumblestrip.redact.redactor import redact
 from rumblestrip.sources.jsonl import Event
 
-
 SIGNALS = ("don't", "do not", "always", "never", "instead", "wrong", "stop", "revert", "must", "we use", "no,")
 
 
