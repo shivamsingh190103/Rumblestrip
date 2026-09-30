@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -29,6 +30,21 @@ from rumblestrip.validate.proposal import validate
 
 def root_from(args: argparse.Namespace) -> Path:
     return find_repo_root(Path(getattr(args, "repo", None) or Path.cwd()))
+
+
+def installed_command(root: Path) -> str:
+    """Return a command hooks can run without relying on an activated shell."""
+    invoked = Path(sys.argv[0])
+    if invoked.name == "__main__.py":
+        return f"{shlex.quote(sys.executable)} -m rumblestrip"
+    if invoked.exists():
+        resolved = invoked.resolve()
+        try:
+            relative = resolved.relative_to(root.resolve()).as_posix()
+            return shlex.quote("./" + relative)
+        except ValueError:
+            return shlex.quote(str(resolved))
+    return shlex.quote(shutil.which("rumblestrip") or "rumblestrip")
 
 
 def print_json(data: Any) -> None:
@@ -257,18 +273,19 @@ def command_install(args: argparse.Namespace) -> int:
     root = root_from(args)
     load_config(root)
     installed: list[str] = []
+    command = installed_command(root)
     if args.git_hook:
         hooks = root / ".git" / "hooks"
         if not hooks.exists():
             raise ConfigError("not a git repository; cannot install pre-commit hook")
         target = hooks / "pre-commit"
         backup = hooks / "pre-commit.rumblestrip.backup"
-        if target.exists() and "rumblestrip check --staged" not in target.read_text(encoding="utf-8", errors="replace"):
+        if target.exists() and "installed by Rumblestrip" not in target.read_text(encoding="utf-8", errors="replace"):
             if not backup.exists():
                 target.replace(backup)
             else:
                 raise ConfigError(f"refusing to overwrite {target}; backup already exists")
-        target.write_text("#!/bin/sh\n# installed by Rumblestrip\nrumblestrip check --staged\n", encoding="utf-8")
+        target.write_text(f"#!/bin/sh\n# installed by Rumblestrip\n{command} check --staged\n", encoding="utf-8")
         target.chmod(0o755)
         installed.append("git pre-commit")
     agents = [args.agent] if args.agent != "all" else ["codex", "claude"]
@@ -278,10 +295,10 @@ def command_install(args: argparse.Namespace) -> int:
             path.parent.mkdir(exist_ok=True)
             data = load_data(path) if path.exists() else {"hooks": {}}
             hooks = data.setdefault("hooks", {})
-            hooks["PostToolUse"] = [{"matcher": "Edit|Write", "command": "rumblestrip hook codex post-tool-use"}]
-            hooks["Stop"] = [{"command": "rumblestrip hook codex stop"}]
-            hooks["SessionStart"] = [{"command": "rumblestrip hook codex session-start"}]
-            hooks["SessionEnd"] = [{"command": "rumblestrip hook codex session-end"}]
+            hooks["PostToolUse"] = [{"matcher": "Edit|Write", "command": f"{command} hook codex post-tool-use"}]
+            hooks["Stop"] = [{"command": f"{command} hook codex stop"}]
+            hooks["SessionStart"] = [{"command": f"{command} hook codex session-start"}]
+            hooks["SessionEnd"] = [{"command": f"{command} hook codex session-end"}]
             dump_data(path, data)
             installed.append("Codex hooks (review them with /hooks)")
         if agent == "claude":
@@ -289,9 +306,9 @@ def command_install(args: argparse.Namespace) -> int:
             path.parent.mkdir(exist_ok=True)
             data = load_data(path) if path.exists() else {}
             hooks = data.setdefault("hooks", {})
-            hooks["PostToolUse"] = [{"matcher": "Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": "rumblestrip hook claude post-tool-use"}]}]
-            hooks["Stop"] = [{"hooks": [{"type": "command", "command": "rumblestrip hook claude stop"}]}]
-            hooks["SessionEnd"] = [{"hooks": [{"type": "command", "command": "rumblestrip hook claude session-end"}]}]
+            hooks["PostToolUse"] = [{"matcher": "Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": f"{command} hook claude post-tool-use"}]}]
+            hooks["Stop"] = [{"hooks": [{"type": "command", "command": f"{command} hook claude stop"}]}]
+            hooks["SessionEnd"] = [{"hooks": [{"type": "command", "command": f"{command} hook claude session-end"}]}]
             dump_data(path, data)
             installed.append("Claude Code hooks")
     if args.ci == "github":

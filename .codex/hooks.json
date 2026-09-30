@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "./.venv/bin/rumblestrip hook codex post-tool-use"
+      }
+    ],
+    "Stop": [
+      {
+        "command": "./.venv/bin/rumblestrip hook codex stop"
+      }
+    ],
+    "SessionStart": [
+      {
+        "command": "./.venv/bin/rumblestrip hook codex session-start"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "command": "./.venv/bin/rumblestrip hook codex session-end"
+      }
+    ]
+  }
+}
