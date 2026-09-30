@@ -1,0 +1,24 @@
+name: Rumblestrip
+description: Run deterministic Rumblestrip checks on a pull request diff.
+inputs:
+  version:
+    description: Rumblestrip package version to install
+    required: false
+    default: 0.1.0
+  base:
+    description: Git base ref
+    required: true
+  format:
+    description: Output format (sarif or github)
+    required: false
+    default: github
+  fail-on:
+    description: Failure level
+    required: false
+    default: error
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v5
+    - shell: bash
+      run: uvx --from "rumblestrip==${{ inputs.version }}" rumblestrip check --diff "${{ inputs.base }}" --format "${{ inputs.format }}"

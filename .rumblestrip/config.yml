@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "languages": [
+    "python",
+    "typescript",
+    "javascript"
+  ],
+  "enforce": {
+    "fail_on": "error",
+    "on_tool_error": "warn",
+    "max_new_allows_per_pr": 0,
+    "timeout_seconds": {
+      "precommit": 5,
+      "hook": 3,
+      "ci": 120
+    },
+    "max_file_bytes": 1000000
+  },
+  "paths": {
+    "ignore": [
+      "vendor/**",
+      "**/generated/**",
+      "dist/**",
+      "node_modules/**",
+      "**/*.min.js"
+    ]
+  },
+  "agents": {
+    "claude_code": {
+      "enabled": true,
+      "scope": "project"
+    },
+    "codex": {
+      "enabled": true,
+      "scope": "project"
+    }
+  },
+  "agent_summary": {
+    "enabled": false,
+    "max_rules": 12,
+    "max_tokens": 800
+  },
+  "hooks": {
+    "bash_changes": false
+  }
+}
