@@ -5,8 +5,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rumblestrip.core.models import CHECK_KINDS, Rule
 from rumblestrip.core.errors import ToolError
+from rumblestrip.core.models import CHECK_KINDS, Rule
 from rumblestrip.engines.builtin import run_rule
 
 

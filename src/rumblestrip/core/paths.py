@@ -6,7 +6,6 @@ from pathlib import Path
 from .errors import ConfigError
 from .serde import dump_data, load_data
 
-
 DEFAULT_CONFIG = {
     "schema_version": 1,
     "languages": ["python", "typescript", "javascript"],

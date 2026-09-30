@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 from collections import Counter
 from pathlib import Path
-
 
 DENY_FILE_PATTERNS = (".env", ".env.*", "*.pem", "id_rsa*", "*.p12", "secrets.*", "credentials*")
 TOKEN_PATTERNS: tuple[tuple[str, str], ...] = (

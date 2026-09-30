@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
+import sqlite3
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-from rumblestrip.core.errors import IntegrityError, ToolError
+from rumblestrip.core.errors import ToolError
 from rumblestrip.core.git import changed_files
 from rumblestrip.core.models import SEVERITY_ORDER, Violation
 from rumblestrip.core.paths import load_config
@@ -98,9 +98,9 @@ def run_checks(root: Path, *, mode: str = "all", files: list[str] | None = None,
             db = StateDB()
             db.record_violations(root, violations, surface)
             db.close()
-        except Exception:
+        except (OSError, sqlite3.DatabaseError) as exc:
             # Ledger failure must not affect enforcement.
-            pass
+            errors.append(f"ledger unavailable: {exc}")
     fail_on = config["enforce"].get("fail_on", "error")
     threshold = SEVERITY_ORDER.get(fail_on, 99)
     failure_count = sum(SEVERITY_ORDER.get(item.severity, 0) >= threshold for item in visible)
@@ -127,8 +127,12 @@ def text_report(result: dict[str, Any], *, verbose: bool = False) -> str:
     warnings = sum(item.severity == "warning" for item in result["visible"])
     if result["failure_count"]:
         lines.append(f"{errors} errors, {warnings} warnings. Commit blocked (fail_on: {result['fail_on']}).")
+        lines.append("Next steps: run 'rumblestrip explain <rule-id>' for rule context, fix findings, then rerun 'rumblestrip check --staged'.")
     else:
         lines.append(f"{errors} errors, {warnings} warnings.")
+        lines.append("Next steps: run 'rumblestrip stats' to track recurring violations over time.")
+    if result["errors"]:
+        lines.append("Tool errors occurred; rerun with --verbose to inspect skipped files and engine issues.")
     return "\n".join(lines)
 
 

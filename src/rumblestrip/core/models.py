@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 SEVERITY_ORDER = {"info": 0, "warning": 1, "error": 2}
 CHECK_KINDS = {"ast_pattern", "path_naming", "text_regex", "dependency", "required_companion", "advisory"}
 
@@ -26,7 +25,7 @@ class Rule:
     schema_version: int = 1
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Rule":
+    def from_dict(cls, data: dict[str, Any]) -> Rule:
         required = ("id", "title", "status", "kind", "severity", "statement")
         missing = [key for key in required if not data.get(key)]
         if missing:
